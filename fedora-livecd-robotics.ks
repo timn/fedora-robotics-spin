@@ -1,4 +1,4 @@
-# Maintained by the Fedora Desktop SIG:
+# Maintained by the Fedora Robotics SIG:
 # http://fedoraproject.org/wiki/SIGs/Robotics
 # mailto:robotics@lists.fedoraproject.org
 
@@ -6,7 +6,6 @@
 
 %packages
 @graphical-internet
-@sound-and-video
 @gnome-desktop
 
 # FIXME; apparently the glibc maintainers dislike this, but it got put into the
@@ -15,6 +14,17 @@ nss-mdns
 
 # This one needs to be kicked out of @base
 -smartmontools
+
+#
+player-devel
+stage-devel
+stage-playerplugin
+fawkes-devel
+fawkes-guis
+
+eclipse-cdt
+eclipse-subclipse
+eclipse-egit
 
 %end
 
