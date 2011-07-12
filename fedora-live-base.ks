@@ -14,13 +14,13 @@ auth --useshadow --enablemd5
 selinux --enforcing
 firewall --enabled --service=mdns
 xconfig --startxonboot
-part / --size 3072 --fstype ext4
+part / --size 4072 --fstype ext4
 services --enabled=NetworkManager --disabled=network,sshd
 
-#repo --name=rawhide --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=rawhide&arch=$basearch
-repo --name=fedora --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=fedora-14&arch=$basearch
-repo --name=updates --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f14&arch=$basearch
-#repo --name=updates-testing --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f14&arch=$basearch
+repo --name=rawhide --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=rawhide&arch=$basearch
+#repo --name=fedora --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=fedora-$releasever&arch=$basearch
+#repo --name=updates --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f$releasever&arch=$basearch
+#repo --name=updates-testing --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=updates-testing-f$releasever&arch=$basearch
 
 %packages
 @base-x
@@ -48,6 +48,9 @@ memtest86+
 # The point of a live image is to install
 anaconda
 isomd5sum
+
+# fpaste is very useful for debugging and very small
+fpaste
 
 %end
 
@@ -77,6 +80,9 @@ exists() {
 }
 
 touch /.liveimg-configured
+
+# Make sure we don't mangle the hardware clock on shutdown
+ln -sf /dev/null /etc/systemd/system/hwclock-save.service
 
 # mount live image
 if [ -b \`readlink -f /dev/live\` ]; then
@@ -184,41 +190,28 @@ chkconfig --level 345 firstboot off 2>/dev/null
 # with systemd, but we can look into that later. - AdamW 2010/08 F14Alpha
 echo "RUN_FIRSTBOOT=NO" > /etc/sysconfig/firstboot
 
+# don't use prelink on a running live image
+sed -i 's/PRELINKING=yes/PRELINKING=no/' /etc/sysconfig/prelink &>/dev/null || :
+
 # don't start yum-updatesd for livecd boots
-chkconfig --level 345 yum-updatesd off 2>/dev/null
+chkconfig --level 345 yum-updatesd off 2>/dev/null || :
 
 # turn off mdmonitor by default
-chkconfig --level 345 mdmonitor off 2>/dev/null
+chkconfig --level 345 mdmonitor off 2>/dev/null || :
 
 # turn off setroubleshoot on the live image to preserve resources
-chkconfig --level 345 setroubleshoot off 2>/dev/null
+chkconfig --level 345 setroubleshoot off 2>/dev/null || :
 
-# don't do packagekit checking by default
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t string /apps/gnome-packagekit/update-icon/frequency_get_updates never >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t string /apps/gnome-packagekit/update-icon/frequency_get_upgrades never >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t string /apps/gnome-packagekit/update-icon/frequency_refresh_cache never >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/update-icon/notify_available false >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/update-icon/notify_distro_upgrades false >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/enable_check_firmware false >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/enable_check_hardware false >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/enable_codec_helper false >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/enable_font_helper false >/dev/null
-gconftool-2 --direct --config-source=xml:readwrite:/etc/gconf/gconf.xml.defaults -s -t bool /apps/gnome-packagekit/enable_mime_type_helper false >/dev/null
-
+# don't enable the gnome-settings-daemon packagekit plugin
+gsettings set org.gnome.settings-daemon.plugins.updates active 'false' || :
 
 # don't start cron/at as they tend to spawn things which are
 # disk intensive that are painful on a live image
-chkconfig --level 345 crond off 2>/dev/null
-chkconfig --level 345 atd off 2>/dev/null
-chkconfig --level 345 anacron off 2>/dev/null
-chkconfig --level 345 readahead_early off 2>/dev/null
-chkconfig --level 345 readahead_later off 2>/dev/null
+chkconfig --level 345 crond off 2>/dev/null || :
+chkconfig --level 345 atd off 2>/dev/null || :
 
 # Stopgap fix for RH #217966; should be fixed in HAL instead
 touch /media/.hal-mtab
-
-# workaround clock syncing on shutdown that we don't want (#297421)
-sed -i -e 's/hwclock/no-such-hwclock/g' /etc/rc.d/init.d/halt
 
 # and hack so that we eject the cd on shutdown if we're using a CD...
 if strstr "\`cat /proc/cmdline\`" CDLABEL= ; then
@@ -309,6 +302,8 @@ rm -f /var/lib/rpm/__db*
 rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora
 echo "Packages within this LiveCD"
 rpm -qa
+# Note that running rpm recreates the rpm db files which aren't needed or wanted
+rm -f /var/lib/rpm/__db*
 
 # go ahead and pre-make the man -k cache (#455968)
 /usr/bin/mandb
@@ -319,8 +314,7 @@ rm -f /boot/initramfs*
 rm -f /core*
 
 # convince readahead not to collect
-rm -f /.readahead_collect
-touch /var/lib/readahead/early.sorted
+# FIXME: for systemd
 
 %end
 
